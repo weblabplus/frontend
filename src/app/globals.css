@@ -1,0 +1,123 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --foreground-rgb: 0, 0, 0;
+  --background-rgb: 248, 250, 252;
+}
+
+body {
+  color: rgb(var(--foreground-rgb));
+  background: rgb(var(--background-rgb));
+}
+
+@layer utilities {
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors font-medium;
+  }
+  .btn-secondary {
+    @apply bg-gray-200 text-gray-800 px-4 py-2 rounded-lg hover:bg-gray-300 transition-colors font-medium;
+  }
+  .btn-danger {
+    @apply bg-medical-critical text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors font-medium;
+  }
+  .card {
+    @apply bg-white rounded-xl shadow-sm border border-gray-100 p-6;
+  }
+  .input-field {
+    @apply w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent;
+  }
+  .badge-critical {
+    @apply bg-red-100 text-red-800 text-xs font-semibold px-2.5 py-0.5 rounded;
+  }
+  .badge-warning {
+    @apply bg-yellow-100 text-yellow-800 text-xs font-semibold px-2.5 py-0.5 rounded;
+  }
+  .badge-success {
+    @apply bg-green-100 text-green-800 text-xs font-semibold px-2.5 py-0.5 rounded;
+  }
+  .badge-info {
+    @apply bg-blue-100 text-blue-800 text-xs font-semibold px-2.5 py-0.5 rounded;
+  }
+}
+
+/* Εκτύπωση: μόνο η προεπισκόπηση ταμείου */
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+
+  #finance-print-area,
+  #finance-print-area * {
+    visibility: visible !important;
+  }
+
+  #finance-print-area {
+    position: absolute !important;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 0 !important;
+    overflow: visible !important;
+    background: #fff;
+  }
+
+  #finance-print-area table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 9px;
+  }
+
+  #finance-print-area thead {
+    display: table-header-group;
+  }
+
+  #finance-print-area tr {
+    page-break-inside: avoid;
+  }
+
+  #worklist-print-area,
+  #worklist-print-area * {
+    visibility: visible !important;
+  }
+
+  #worklist-print-area {
+    position: absolute !important;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 0 !important;
+    overflow: visible !important;
+    background: #fff;
+  }
+
+  #worklist-print-area table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 9px;
+  }
+
+  #worklist-print-area thead {
+    display: table-header-group;
+  }
+
+  #worklist-print-area tr {
+    page-break-inside: avoid;
+  }
+
+  @page {
+    size: A4 landscape;
+    margin: 8mm;
+  }
+}
