@@ -5,6 +5,8 @@ import { Upload, FileText, AlertCircle, CheckCircle2, Loader2, User } from 'luci
 import { getAuthToken } from '@/lib/auth';
 import { PatientSelector } from '@/components/patient-selector';
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+
 export default function UploadPage() {
   const [file, setFile] = useState<File | null>(null);
   const [format, setFormat] = useState('csv');
@@ -35,7 +37,7 @@ export default function UploadPage() {
       const headers: Record<string, string> = {};
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
-      const res = await fetch('http://localhost:3001/api/upload', {
+      const res = await fetch(`${API_BASE}/upload`, {
         method: 'POST',
         headers,
         body: formData,
