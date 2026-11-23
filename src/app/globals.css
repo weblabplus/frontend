@@ -10,6 +10,7 @@
 body {
   color: rgb(var(--foreground-rgb));
   background: rgb(var(--background-rgb));
+  font-family: var(--font-geologica), Geologica, ui-sans-serif, system-ui, sans-serif;
 }
 
 @layer utilities {

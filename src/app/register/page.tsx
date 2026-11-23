@@ -43,7 +43,7 @@ export default function RegisterPage() {
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary-100 mb-4">
             <Stethoscope className="w-8 h-8 text-primary-600" />
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">Εγγραφή στο MediLab</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Εγγραφή στο Medisend</h1>
           <p className="text-sm text-gray-500 mt-1">
             Δημιουργήστε τον λογαριασμό σας
           </p>

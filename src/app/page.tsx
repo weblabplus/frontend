@@ -1,17 +1,9 @@
 'use client';
 
-import { useState } from 'react';
-import { Activity, AlertTriangle, CheckCircle2, Upload, FileText, TrendingUp } from 'lucide-react';
+import { Activity, AlertTriangle, CheckCircle2, TrendingUp } from 'lucide-react';
 import { NewsFeed } from '@/components/news-feed';
 
 export default function HomePage() {
-  const [stats] = useState({
-    totalTests: 0,
-    normal: 0,
-    abnormal: 0,
-    critical: 0,
-  });
-
   return (
     <div>
       {/* Hero Section */}
@@ -23,80 +15,6 @@ export default function HomePage() {
           Ανεβάστε εργαστηριακές εξετάσεις και λάβετε αυτόματη ανάλυση με
           συνδυασμό ιατρικών κανόνων και τεχνητής νοημοσύνης.
         </p>
-      </div>
-
-      {/* Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-        <a
-          href="/upload"
-          className="card hover:shadow-md transition-shadow cursor-pointer group"
-        >
-          <div className="flex items-start gap-4">
-            <div className="p-3 rounded-lg bg-primary-50 group-hover:bg-primary-100 transition-colors">
-              <Upload className="w-6 h-6 text-primary-600" />
-            </div>
-            <div>
-              <h3 className="font-semibold text-gray-900 mb-1">Upload Εξετάσεων</h3>
-              <p className="text-sm text-gray-500">
-                Ανεβάστε CSV, JSON, HL7 ή PDF αρχεία με εργαστηριακά αποτελέσματα.
-              </p>
-            </div>
-          </div>
-        </a>
-
-        <a
-          href="/results"
-          className="card hover:shadow-md transition-shadow cursor-pointer group"
-        >
-          <div className="flex items-start gap-4">
-            <div className="p-3 rounded-lg bg-green-50 group-hover:bg-green-100 transition-colors">
-              <Activity className="w-6 h-6 text-green-600" />
-            </div>
-            <div>
-              <h3 className="font-semibold text-gray-900 mb-1">Αποτελέσματα</h3>
-              <p className="text-sm text-gray-500">
-                Δείτε και αναλύστε τα αποτελέσματα των εξετάσεων με λεπτομερή ερμηνεία.
-              </p>
-            </div>
-          </div>
-        </a>
-
-        <a
-          href="/reports"
-          className="card hover:shadow-md transition-shadow cursor-pointer group"
-        >
-          <div className="flex items-start gap-4">
-            <div className="p-3 rounded-lg bg-purple-50 group-hover:bg-purple-100 transition-colors">
-              <FileText className="w-6 h-6 text-purple-600" />
-            </div>
-            <div>
-              <h3 className="font-semibold text-gray-900 mb-1">Αναφορές</h3>
-              <p className="text-sm text-gray-500">
-                Δημιουργήστε διαγνωστικές αναφορές σε HTML, JSON ή CSV format.
-              </p>
-            </div>
-          </div>
-        </a>
-      </div>
-
-      {/* Stats Overview */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-12">
-        <div className="card text-center">
-          <div className="text-3xl font-bold text-primary-600">{stats.totalTests}</div>
-          <div className="text-sm text-gray-500 mt-1">Σύνολο Εξετάσεων</div>
-        </div>
-        <div className="card text-center">
-          <div className="text-3xl font-bold text-green-600">{stats.normal}</div>
-          <div className="text-sm text-gray-500 mt-1">Φυσιολογικές</div>
-        </div>
-        <div className="card text-center">
-          <div className="text-3xl font-bold text-yellow-600">{stats.abnormal}</div>
-          <div className="text-sm text-gray-500 mt-1">Παθολογικές</div>
-        </div>
-        <div className="card text-center">
-          <div className="text-3xl font-bold text-red-600">{stats.critical}</div>
-          <div className="text-sm text-gray-500 mt-1">Κρίσιμες</div>
-        </div>
       </div>
 
       {/* Features */}

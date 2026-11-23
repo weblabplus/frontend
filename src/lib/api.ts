@@ -94,52 +94,6 @@ export const api = {
       body: JSON.stringify(updates),
     }),
 
-  // Upload
-  upload: async (formData: FormData) => {
-    const headers: Record<string, string> = {};
-    if (_getToken) {
-      const token = await _getToken();
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-    }
-    return fetch(`${API_BASE}/upload`, {
-      method: 'POST',
-      headers,
-      body: formData,
-    }).then(r => r.json());
-  },
-
-  parseResults: (data: string, format: string, patientId?: string) =>
-    fetchAPI<any>('/lab-results/parse', {
-      method: 'POST',
-      body: JSON.stringify({ data, format, patientId }),
-    }),
-
-  // Analysis
-  analyze: (results: any[], patient: any, historicalResults?: any) =>
-    fetchAPI<any>('/analyze', {
-      method: 'POST',
-      body: JSON.stringify({ results, patient, historicalResults }),
-    }),
-
-  analyzeRuleBased: (results: any[], patient: any) =>
-    fetchAPI<any>('/analyze/rule-based', {
-      method: 'POST',
-      body: JSON.stringify({ results, patient }),
-    }),
-
-  analyzeML: (results: any[], historicalResults?: any) =>
-    fetchAPI<any>('/analyze/ml', {
-      method: 'POST',
-      body: JSON.stringify({ results, historicalResults }),
-    }),
-
-  // Reports
-  generateReport: (report: any, format: string = 'html') =>
-    fetchAPI<any>('/reports/generate', {
-      method: 'POST',
-      body: JSON.stringify({ report, format }),
-    }),
-
   // Reference Ranges
   getReferenceRanges: () => fetchAPI<any>('/reference-ranges'),
   getReferenceRange: (testCode: string) => fetchAPI<any>(`/reference-ranges/${testCode}`),
@@ -148,9 +102,6 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ testCode, range }),
     }),
-
-  // Formats
-  getFormats: () => fetchAPI<any>('/formats'),
 
   // Visits
   getVisits: (

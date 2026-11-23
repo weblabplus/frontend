@@ -3,7 +3,7 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
-import { Stethoscope, LogOut, LogIn, UserPlus, User, Shield, Settings, ChevronLeft, ChevronRight } from 'lucide-react';
+import { LogOut, LogIn, UserPlus, User, Shield, Settings, ChevronLeft, ChevronRight, HeartPulse } from 'lucide-react';
 
 export function NavBar() {
   const { user, isAuthenticated, loading, logout } = useAuth();
@@ -44,8 +44,8 @@ export function NavBar() {
           {/* Logo */}
           <div className="flex items-center gap-2 shrink-0">
             <Link href="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
-              <Stethoscope className="w-7 h-7 text-primary-600" />
-              <h1 className="text-xl font-bold text-primary-700 hidden sm:block">MediLab</h1>
+              <HeartPulse className="w-7 h-7 text-primary-600" />
+              <h1 className="text-xl font-bold text-primary-700 hidden sm:block">Medisend</h1>
             </Link>
           </div>
 
@@ -68,12 +68,9 @@ export function NavBar() {
             <NavLink href="/">Dashboard</NavLink>
             {isAuthenticated && (
               <>
+                <NavLink href="/calendar">Ημερολόγιο</NavLink>
                 <NavLink href="/patients">Ασθενείς</NavLink>
                 <NavLink href="/visits">Επισκέψεις</NavLink>
-                <NavLink href="/calendar">Ημερολόγιο</NavLink>
-                <NavLink href="/upload">Upload</NavLink>
-                <NavLink href="/results">Αποτελέσματα</NavLink>
-                <NavLink href="/reports">Αναφορές</NavLink>
                 <NavLink href="/finance">Ταμείο</NavLink>
               </>
             )}
