@@ -4,7 +4,12 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { api } from '@/lib/api';
-import { Settings, User, Mail, Shield, Save, ArrowLeft, CheckCircle, AlertCircle, RefreshCw, Database, Hash, Stethoscope, KeyRound, Trash2, Clock, Beaker, Loader2, Send, Building2, Barcode } from 'lucide-react';
+import { buildBookingLink } from '@/lib/booking-link';
+import { Settings, User, Mail, Shield, Save, ArrowLeft, CheckCircle, AlertCircle, RefreshCw, Database, Hash, Stethoscope, KeyRound, Trash2, Clock, Beaker, Loader2, Send, Building2, Barcode, Cloud, Settings2, CalendarRange, Link2, Copy, ExternalLink, Plus } from 'lucide-react';
+
+// Σύνδεσμος προς το ανεξάρτητο booking app (Hapio Booking Flow).
+// Ορίζεται στο frontend/.env.local ή στο Vercel.
+const BOOKING_URL = (process.env.NEXT_PUBLIC_BOOKING_URL || '').trim();
 
 /** Τύποι barcode που υποστηρίζονται για την εκτύπωση αριθμού εντολής */
 const BARCODE_FORMATS = [
@@ -104,6 +109,32 @@ export default function SettingsPage() {
   const [repoLock, setRepoLock] = useState<import('@/lib/api').LabProfileResponse['lock']>(null);
   const [nowTick, setNowTick] = useState(Date.now());
 
+  // Admin: Hapio (online ραντεβού)
+  const [hapioStatus, setHapioStatus] = useState<import('@/lib/api').HapioStatus | null>(null);
+  const [hapioLoading, setHapioLoading] = useState(false);
+  const [hapioSetupBusy, setHapioSetupBusy] = useState(false);
+  const [hapioSyncBusy, setHapioSyncBusy] = useState(false);
+  const [hapioMonth, setHapioMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [hapioSyncResult, setHapioSyncResult] = useState<import('@/lib/api').HapioSyncResult | null>(null);
+  const [hapioMessage, setHapioMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+  // Προσωπικό link online ραντεβού
+  const [myBookingToken, setMyBookingToken] = useState<string | null>(null);
+  const [bookingLinkBusy, setBookingLinkBusy] = useState(false);
+  const [adminBookingLinks, setAdminBookingLinks] = useState<
+    Array<{ uid: string; displayName: string; email: string; role: string; token: string }>
+  >([]);
+  const [bookingLinkMessage, setBookingLinkMessage] = useState<{
+    type: 'success' | 'error' | 'info';
+    text: string;
+  } | null>(null);
+
+  // Ρυθμίσεις ραντεβού (διάρκεια / βήμα ώρας / προσωπικό)
+  const [hapioDuration, setHapioDuration] = useState(30);
+  const [hapioInterval, setHapioInterval] = useState(15);
+  const [hapioResourceId, setHapioResourceId] = useState('');
+  const [hapioNewResource, setHapioNewResource] = useState('');
+  const [hapioSettingsBusy, setHapioSettingsBusy] = useState(false);
+
   // Ref για ανίχνευση αλλαγών στην κατάσταση συγχρονισμού
   const prevSyncState = useRef<{ catalogSyncing: boolean; loincSyncing: boolean; paramsSyncing: boolean; initialized: boolean }>({
     catalogSyncing: false,
@@ -155,6 +186,29 @@ export default function SettingsPage() {
       cancelled = true;
     };
   }, [isAuthenticated]);
+
+  // Φόρτωση κατάστασης Hapio (admin)
+  useEffect(() => {
+    if (!isAdmin) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        setHapioLoading(true);
+        const data = await api.getHapioStatus();
+        if (!cancelled) setHapioStatus(data);
+      } catch (err: any) {
+        if (!cancelled) {
+          setHapioMessage({ type: 'error', text: err?.message || 'Σφάλμα φόρτωσης Hapio' });
+        }
+      } finally {
+        if (!cancelled) setHapioLoading(false);
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin]);
 
   // Φόρτωση κατάστασης sync για admins
   useEffect(() => {
@@ -573,6 +627,153 @@ export default function SettingsPage() {
       setEfConfigMessage({ type: 'error', text: err?.message || 'Σφάλμα δοκιμής' });
     } finally {
       setEfConfigTesting(false);
+    }
+  };
+
+  // ── Προσωπικό link online ραντεβού ──
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await api.getBookingLink();
+        if (!cancelled) setMyBookingToken(data.token);
+        if (isAdmin) {
+          const all = await api.getAdminBookingLinks();
+          if (!cancelled) setAdminBookingLinks(all.links || []);
+        }
+      } catch {
+        // Χωρίς σύνδεση/δικαιώματα — αγνοούμε
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, isAdmin]);
+
+  const handleRotateBookingLink = async () => {
+    try {
+      setBookingLinkBusy(true);
+      setBookingLinkMessage(null);
+      const result = await api.rotateBookingLink();
+      setMyBookingToken(result.token);
+      setBookingLinkMessage({ type: 'success', text: result.message });
+      if (isAdmin) {
+        const all = await api.getAdminBookingLinks();
+        setAdminBookingLinks(all.links || []);
+      }
+    } catch (err: any) {
+      setBookingLinkMessage({ type: 'error', text: err?.message || 'Σφάλμα ανανέωσης link' });
+    } finally {
+      setBookingLinkBusy(false);
+    }
+  };
+
+  const copyText = (text: string) => {
+    navigator.clipboard?.writeText(text);
+  };
+
+  // ── Admin: Hapio handlers ──
+  const reloadHapioStatus = async () => {
+    try {
+      setHapioLoading(true);
+      setHapioStatus(await api.getHapioStatus());
+    } catch (err: any) {
+      setHapioMessage({ type: 'error', text: err?.message || 'Σφάλμα φόρτωσης Hapio' });
+    } finally {
+      setHapioLoading(false);
+    }
+  };
+
+  // Τα πεδία διάρκειας/βήματος/προσωπικού ακολουθούν το status όταν φορτώνει
+  useEffect(() => {
+    const booking = hapioStatus?.booking;
+    if (!booking) return;
+    setHapioDuration(booking.durationMinutes ?? 30);
+    setHapioInterval(booking.bookableIntervalMinutes ?? 15);
+    setHapioResourceId(booking.resourceId ?? '');
+  }, [hapioStatus?.booking]);
+
+  const handleHapioCreateResource = async () => {
+    const name = hapioNewResource.trim();
+    if (!name) return;
+    try {
+      setHapioSettingsBusy(true);
+      setHapioMessage(null);
+      const result = await api.createHapioResource(name);
+      await api.setHapioResource(result.resource.id);
+      setHapioNewResource('');
+      setHapioMessage({
+        type: 'success',
+        text: `${result.message} και ορίστηκε ως ενεργό προσωπικό.`,
+      });
+      await reloadHapioStatus();
+    } catch (err: any) {
+      setHapioMessage({ type: 'error', text: err?.message || 'Σφάλμα δημιουργίας προσωπικού' });
+    } finally {
+      setHapioSettingsBusy(false);
+    }
+  };
+
+  const handleHapioSaveSettings = async () => {
+    try {
+      setHapioSettingsBusy(true);
+      setHapioMessage(null);
+      await api.updateHapioService({
+        durationMinutes: hapioDuration,
+        bookableIntervalMinutes: hapioInterval,
+      });
+      if (hapioResourceId) {
+        await api.setHapioResource(hapioResourceId);
+      }
+      setHapioMessage({
+        type: 'success',
+        text: `Οι ρυθμίσεις ραντεβού αποθηκεύτηκαν (διάρκεια ${hapioDuration}′, ώρες ανά ${hapioInterval}′).`,
+      });
+      await reloadHapioStatus();
+    } catch (err: any) {
+      setHapioMessage({ type: 'error', text: err?.message || 'Σφάλμα αποθήκευσης ρυθμίσεων' });
+    } finally {
+      setHapioSettingsBusy(false);
+    }
+  };
+
+  const handleHapioSetup = async () => {
+    try {
+      setHapioSetupBusy(true);
+      setHapioMessage(null);
+      const result = await api.setupHapio();
+      setHapioMessage({
+        type: 'success',
+        text: `Οι προεπιλογές Hapio είναι έτοιμες (${result.location.name} · ${result.service.name} · ${result.resource.name}).`,
+      });
+      await reloadHapioStatus();
+    } catch (err: any) {
+      setHapioMessage({ type: 'error', text: err?.message || 'Σφάλμα ρύθμισης Hapio' });
+    } finally {
+      setHapioSetupBusy(false);
+    }
+  };
+
+  const handleHapioMonthSync = async () => {
+    if (!/^\d{4}-\d{2}$/.test(hapioMonth)) {
+      setHapioMessage({ type: 'error', text: 'Επιλέξτε έγκυρο μήνα (YYYY-MM).' });
+      return;
+    }
+    try {
+      setHapioSyncBusy(true);
+      setHapioMessage(null);
+      setHapioSyncResult(null);
+      const result = await api.syncHapio({ month: hapioMonth });
+      setHapioSyncResult(result);
+      setHapioMessage({
+        type: result.skipped.length > 0 ? 'info' : 'success',
+        text: `Συγχρονισμός ${hapioMonth}: ${result.created} νέα, ${result.updated} ενημερώθηκαν, ${result.skipped.length} παρέμειναν εκτός (από ${result.scanned} bookings).`,
+      });
+    } catch (err: any) {
+      setHapioMessage({ type: 'error', text: err?.message || 'Σφάλμα συγχρονισμού Hapio' });
+    } finally {
+      setHapioSyncBusy(false);
     }
   };
 
@@ -1692,6 +1893,506 @@ export default function SettingsPage() {
               })}
             </div>
           </div>
+
+          {/* ── Προσωπικό link online ραντεβού (όλοι οι χρήστες) ── */}
+          {isAuthenticated && (
+            <div className="mt-8 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="p-6 border-b border-gray-100">
+                <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                  <Link2 className="w-5 h-5 text-primary-600" />
+                  Το προσωπικό μου link ραντεβού
+                </h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  Μοιράστε αυτό το link στους ασθενείς σας. Κάθε ραντεβού που κλείνεται από αυτό
+                  καταχωρείται στο <strong>δικό σας</strong> ημερολόγιο κατά τον συγχρονισμό.
+                </p>
+              </div>
+
+              <div className="p-6 space-y-4">
+                {bookingLinkMessage && (
+                  <div
+                    className={`flex items-center gap-2 p-3 rounded-lg text-sm ${
+                      bookingLinkMessage.type === 'success'
+                        ? 'bg-green-50 text-green-800 border border-green-200'
+                        : bookingLinkMessage.type === 'error'
+                          ? 'bg-red-50 text-red-800 border border-red-200'
+                          : 'bg-blue-50 text-blue-800 border border-blue-200'
+                    }`}
+                  >
+                    {bookingLinkMessage.type === 'success' ? (
+                      <CheckCircle className="w-4 h-4 shrink-0" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 shrink-0" />
+                    )}
+                    <span>{bookingLinkMessage.text}</span>
+                  </div>
+                )}
+
+                {BOOKING_URL ? (
+                  myBookingToken ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <code className="flex-1 min-w-0 break-all text-xs font-mono bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+                        {buildBookingLink(myBookingToken)}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          copyText(buildBookingLink(myBookingToken));
+                          setBookingLinkMessage({ type: 'success', text: 'Το link αντιγράφηκε.' });
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                        Αντιγραφή
+                      </button>
+                      <a
+                        href={buildBookingLink(myBookingToken)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-primary-700 bg-primary-50 border border-primary-200 rounded-lg hover:bg-primary-100"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        Άνοιγμα
+                      </a>
+                      <button
+                        type="button"
+                        onClick={handleRotateBookingLink}
+                        disabled={bookingLinkBusy}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-amber-800 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100 disabled:opacity-60"
+                        title="Δημιουργεί νέο link και ακυρώνει το παλιό"
+                      >
+                        {bookingLinkBusy ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <RefreshCw className="w-3.5 h-3.5" />
+                        )}
+                        Ανανέωση link
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="flex items-center gap-2 text-sm text-gray-500">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Φόρτωση link…
+                    </p>
+                  )
+                ) : (
+                  <p className="text-sm text-amber-800">
+                    Δεν έχει οριστεί <code>NEXT_PUBLIC_BOOKING_URL</code> στο περιβάλλον του
+                    frontend.
+                  </p>
+                )}
+
+                {isAdmin && adminBookingLinks.length > 0 && (
+                  <div className="border-t border-gray-100 pt-4">
+                    <h3 className="text-sm font-semibold text-gray-900">
+                      Links όλων των χρηστών ({adminBookingLinks.length})
+                    </h3>
+                    <div className="mt-2 divide-y divide-gray-100">
+                      {adminBookingLinks.map(link => (
+                        <div
+                          key={link.uid}
+                          className="flex flex-wrap items-center gap-2 py-2 text-xs"
+                        >
+                          <span className="w-40 shrink-0 font-medium text-gray-800 truncate">
+                            {link.displayName}
+                          </span>
+                          <code className="flex-1 min-w-0 break-all font-mono text-gray-500">
+                            {buildBookingLink(link.token)}
+                          </code>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              copyText(buildBookingLink(link.token));
+                              setBookingLinkMessage({
+                                type: 'success',
+                                text: `Το link του/της ${link.displayName} αντιγράφηκε.`,
+                              });
+                            }}
+                            className="inline-flex items-center gap-1 px-2 py-1 font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                          >
+                            <Copy className="w-3 h-3" />
+                            Αντιγραφή
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ── Admin Section: Hapio (online ραντεβού) ── */}
+          {isAdmin && (
+            <div className="mt-8 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="p-6 border-b border-gray-100">
+                <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                  <Cloud className="w-5 h-5 text-sky-600" />
+                  Hapio — Online Ραντεβού
+                </h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  Σύνδεση με το Hapio Booking API. Κάθε ραντεβού που δημιουργείται, αλλάζει ή
+                  διαγράφεται στην εφαρμογή αποστέλλεται αυτόματα στο Hapio. Ο συγχρονισμός
+                  εισάγει τα bookings ενός ολόκληρου μήνα ως ραντεβού.
+                </p>
+              </div>
+
+              <div className="p-6 space-y-6">
+                {hapioMessage && (
+                  <div
+                    className={`flex items-center gap-2 p-4 rounded-lg ${
+                      hapioMessage.type === 'success'
+                        ? 'bg-green-50 text-green-800 border border-green-200'
+                        : hapioMessage.type === 'error'
+                          ? 'bg-red-50 text-red-800 border border-red-200'
+                          : 'bg-blue-50 text-blue-800 border border-blue-200'
+                    }`}
+                  >
+                    {hapioMessage.type === 'success' ? (
+                      <CheckCircle className="w-5 h-5 shrink-0" />
+                    ) : hapioMessage.type === 'error' ? (
+                      <AlertCircle className="w-5 h-5 shrink-0" />
+                    ) : (
+                      <RefreshCw className="w-5 h-5 shrink-0" />
+                    )}
+                    <span className="text-sm font-medium">{hapioMessage.text}</span>
+                  </div>
+                )}
+
+                {/* Κατάσταση σύνδεσης */}
+                <div className="p-4 bg-gray-50 rounded-lg">
+                  {hapioLoading ? (
+                    <p className="flex items-center gap-2 text-sm text-gray-500">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Φόρτωση κατάστασης Hapio…
+                    </p>
+                  ) : hapioStatus?.configured ? (
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+                        <span
+                          className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold ${
+                            hapioStatus.connected
+                              ? 'bg-green-100 text-green-700'
+                              : 'bg-amber-100 text-amber-800'
+                          }`}
+                        >
+                          {hapioStatus.connected ? (
+                            <CheckCircle className="w-3.5 h-3.5" />
+                          ) : (
+                            <AlertCircle className="w-3.5 h-3.5" />
+                          )}
+                          {hapioStatus.connected ? 'Συνδεδεμένο' : 'Σφάλμα σύνδεσης'}
+                        </span>
+                        {hapioStatus.project && (
+                          <span className="text-gray-700">
+                            Project: <strong>{hapioStatus.project.name}</strong>
+                          </span>
+                        )}
+                        {hapioStatus.autoPush && (
+                          <span className="text-xs text-gray-500">αυτόματη αποστολή ραντεβού</span>
+                        )}
+                      </div>
+
+                      {hapioStatus.counts && (
+                        <p className="text-xs text-gray-500">
+                          {hapioStatus.counts.locations} τοποθεσίες · {hapioStatus.counts.services}{' '}
+                          υπηρεσίες · {hapioStatus.counts.resources} πόροι
+                        </p>
+                      )}
+
+                      <div className="flex flex-wrap gap-2 text-[11px]">
+                        {[
+                          ['Location', hapioStatus.defaults.locationId],
+                          ['Service', hapioStatus.defaults.serviceId],
+                          ['Resource', hapioStatus.defaults.resourceId],
+                        ].map(([label, id]) => (
+                          <span
+                            key={label as string}
+                            className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 ${
+                              id
+                                ? 'border-gray-200 bg-white text-gray-700'
+                                : 'border-dashed border-gray-300 text-gray-400'
+                            }`}
+                            title={(id as string) || 'Δεν έχει οριστεί'}
+                          >
+                            <span className="font-semibold">{label}:</span>
+                            <span className="font-mono">
+                              {id ? `${String(id).slice(0, 8)}…` : '—'}
+                            </span>
+                          </span>
+                        ))}
+                      </div>
+
+                      {hapioStatus.error && (
+                        <p className="text-xs text-red-600">{hapioStatus.error}</p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-amber-800">
+                      Το Hapio δεν είναι ρυθμισμένο. Προσθέστε <code>HAPIO_API_KEY</code> στο
+                      περιβάλλον του backend (<code>backend/.env.local</code>).
+                    </p>
+                  )}
+                </div>
+
+                {/* Ρυθμίσεις ραντεβού: διάρκεια / βήμα ώρας / προσωπικό */}
+                {hapioStatus?.configured && hapioStatus.connected && (
+                  <div className="border-t border-gray-100 pt-5">
+                    <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                      <Clock className="w-4 h-4 text-sky-600" />
+                      Ρυθμίσεις ραντεβού
+                    </h3>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Καθορίζουν τι βλέπει ο ασθενής στο online booking: πόσο διαρκεί το ραντεβού,
+                      ανά πόσο εμφανίζονται οι διαθέσιμες ώρες και ποιο προσωπικό εξυπηρετεί.
+                    </p>
+
+                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">
+                          Διάρκεια ραντεβού
+                        </label>
+                        <select
+                          value={hapioDuration}
+                          onChange={event => setHapioDuration(Number(event.target.value))}
+                          disabled={hapioSettingsBusy}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-60"
+                        >
+                          {[15, 20, 30, 45, 60, 90, 120].map(minutes => (
+                            <option key={minutes} value={minutes}>
+                              {minutes} λεπτά
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">
+                          Διαθέσιμες ώρες ανά
+                        </label>
+                        <select
+                          value={hapioInterval}
+                          onChange={event => setHapioInterval(Number(event.target.value))}
+                          disabled={hapioSettingsBusy}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-60"
+                        >
+                          {[5, 10, 15, 20, 30, 60].map(minutes => (
+                            <option key={minutes} value={minutes}>
+                              {minutes} λεπτά
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">
+                          Προσωπικό
+                        </label>
+                        <select
+                          value={hapioResourceId}
+                          onChange={event => setHapioResourceId(event.target.value)}
+                          disabled={hapioSettingsBusy}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-60"
+                        >
+                          <option value="">— Επιλέξτε —</option>
+                          {(hapioStatus.options?.resources || []).map(resource => (
+                            <option key={resource.id} value={resource.id}>
+                              {resource.name}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="mt-2 flex items-center gap-1.5">
+                          <input
+                            type="text"
+                            value={hapioNewResource}
+                            onChange={event => setHapioNewResource(event.target.value)}
+                            placeholder="π.χ. Αιμοληψία 2"
+                            disabled={hapioSettingsBusy}
+                            className="flex-1 min-w-0 px-2 py-1.5 border border-gray-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-60"
+                          />
+                          <button
+                            type="button"
+                            onClick={handleHapioCreateResource}
+                            disabled={!hapioNewResource.trim() || hapioSettingsBusy}
+                            title="Δημιουργία νέου προσωπικού στο Hapio"
+                            className="inline-flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-sky-700 bg-sky-50 border border-sky-200 rounded-lg hover:bg-sky-100 disabled:opacity-50"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            Νέο
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-[11px] text-gray-500">
+                        Τρέχον: {hapioStatus.booking?.serviceName || '—'} ·{' '}
+                        {hapioStatus.booking?.durationMinutes ?? '—'}′ · ώρες ανά{' '}
+                        {hapioStatus.booking?.bookableIntervalMinutes ?? '—'}′ ·{' '}
+                        {hapioStatus.booking?.resourceName || 'χωρίς προσωπικό'}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={handleHapioSaveSettings}
+                        disabled={hapioSettingsBusy || hapioSetupBusy || hapioSyncBusy}
+                        className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg disabled:opacity-60"
+                      >
+                        {hapioSettingsBusy ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Save className="w-4 h-4" />
+                        )}
+                        Αποθήκευση ρυθμίσεων
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Σύνδεσμος online ραντεβού (ανεξάρτητο booking app) */}
+                <div className="p-4 bg-sky-50 border border-sky-200 rounded-lg">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Link2 className="w-4 h-4 text-sky-600" />
+                    <span className="text-sm font-semibold text-gray-900">
+                      Σύνδεσμος online ραντεβού (ασθενείς)
+                    </span>
+                  </div>
+                  {BOOKING_URL ? (
+                    <>
+                      <p className="text-xs text-gray-600">
+                        Αυτός ο σύνδεσμος οδηγεί στο ανεξάρτητο booking app (Hapio Booking Flow),
+                        όπου ο ασθενής κλείνει μόνος του ραντεβού συμπληρώνοντας τα στοιχεία του.
+                        Χρησιμοποιεί ξεχωριστό δημόσιο Hapio token.
+                      </p>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <code className="flex-1 min-w-0 break-all text-xs font-mono bg-white border border-sky-200 rounded-lg px-3 py-2">
+                          {BOOKING_URL}
+                        </code>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard?.writeText(BOOKING_URL);
+                            setHapioMessage({ type: 'success', text: 'Ο σύνδεσμος αντιγράφηκε.' });
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                          Αντιγραφή
+                        </button>
+                        <a
+                          href={BOOKING_URL}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-sky-700 bg-sky-100 border border-sky-200 rounded-lg hover:bg-sky-200"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          Άνοιγμα
+                        </a>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-xs text-gray-600">
+                      Δεν έχει οριστεί σύνδεσμος. Ορίστε <code>NEXT_PUBLIC_BOOKING_URL</code> στο{' '}
+                      <code>frontend/.env.local</code> ή στο Vercel.
+                    </p>
+                  )}
+                </div>
+
+                {/* Ρύθμιση */}
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={reloadHapioStatus}
+                    disabled={hapioLoading || hapioSetupBusy || hapioSyncBusy}
+                    className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-60"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    Ανανέωση
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleHapioSetup}
+                    disabled={!hapioStatus?.configured || hapioSetupBusy || hapioSyncBusy}
+                    className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-sky-700 bg-sky-50 border border-sky-200 rounded-lg hover:bg-sky-100 disabled:opacity-60"
+                    title="Δημιουργία/έλεγχος location, service, resource και ωραρίου"
+                  >
+                    {hapioSetupBusy ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Settings2 className="w-4 h-4" />
+                    )}
+                    Ρύθμιση Hapio
+                  </button>
+                </div>
+
+                {/* Συγχρονισμός μήνα */}
+                <div className="border-t border-gray-100 pt-5">
+                  <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                    <CalendarRange className="w-4 h-4 text-sky-600" />
+                    Συγχρονισμός μήνα
+                  </h3>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Εισάγει όλα τα bookings του Hapio για τον επιλεγμένο μήνα. Τα bookings με{' '}
+                    <code>patientId</code> συνδέονται απευθείας· τα online ραντεβού (χωρίς{' '}
+                    <code>patientId</code>) αντιστοιχίζονται με email/τηλέφωνο ή ονοματεπώνυμο και,
+                    αν δεν βρεθούν, δημιουργούν νέο ασθενή με τα στοιχεία της φόρμας.
+                  </p>
+
+                  <div className="mt-3 flex flex-wrap items-end gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Μήνας</label>
+                      <input
+                        type="month"
+                        value={hapioMonth}
+                        onChange={event => setHapioMonth(event.target.value)}
+                        className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleHapioMonthSync}
+                      disabled={hapioSyncBusy || !hapioStatus?.configured}
+                      className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg disabled:opacity-60"
+                    >
+                      {hapioSyncBusy ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="w-4 h-4" />
+                      )}
+                      Συγχρονισμός μήνα
+                    </button>
+                  </div>
+
+                  {hapioSyncResult && (
+                    <div className="mt-3 p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-700">
+                      <p>
+                        Σάρωση <strong>{hapioSyncResult.scanned}</strong> bookings · νέα{' '}
+                        <strong>{hapioSyncResult.created}</strong> · ενημερώθηκαν{' '}
+                        <strong>{hapioSyncResult.updated}</strong> · εκτός{' '}
+                        <strong>{hapioSyncResult.skipped.length}</strong>
+                      </p>
+                      {hapioSyncResult.skipped.length > 0 && (
+                        <ul className="mt-2 space-y-1 text-xs text-amber-800">
+                          {hapioSyncResult.skipped.slice(0, 10).map(item => (
+                            <li key={item.bookingId}>
+                              {item.bookingId}:{' '}
+                              {item.reason === 'MISSING_PATIENT'
+                                ? 'λείπει patientId στα metadata'
+                                : item.reason === 'UNKNOWN_PATIENT'
+                                  ? 'άγνωστος ασθενής'
+                                  : item.reason}
+                            </li>
+                          ))}
+                          {hapioSyncResult.skipped.length > 10 && (
+                            <li>… και {hapioSyncResult.skipped.length - 10} ακόμη</li>
+                          )}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* ── Admin Section: Database Sync ── */}
           {isAdmin && (

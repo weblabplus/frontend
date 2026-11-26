@@ -138,6 +138,11 @@ const isOverdue = (entry: FinanceEntry) =>
 export default function FinancePage() {
   const { loading: authLoading } = useAuth();
   const [entries, setEntries] = useState<FinanceEntry[]>([]);
+  const [listMeta, setListMeta] = useState<{
+    total: number;
+    counts: { all: number; debt: number; receivable: number };
+    totals: { amount: number; paidAmount: number; balance: number };
+  }>({ total: 0, counts: { all: 0, debt: 0, receivable: 0 }, totals: { amount: 0, paidAmount: 0, balance: 0 } });
   const [summary, setSummary] = useState<FinanceSummary | null>(null);
   const [patients, setPatients] = useState<PatientOption[]>([]);
   const [centers, setCenters] = useState<CenterOption[]>([]);
@@ -150,8 +155,13 @@ export default function FinancePage() {
 
   const [tab, setTab] = useState<'all' | 'debt' | 'receivable'>('all');
   const [statusFilter, setStatusFilter] = useState<'' | FinanceEntryStatus>('');
-  const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
+  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState('');
+  const [years, setYears] = useState<Array<{ year: string; count: number }>>([]);
+  const [listLoading, setListLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [listVersion, setListVersion] = useState(0);
   const autoSyncStarted = useRef(false);
 
   // Εξαγωγή / Εκτύπωση
@@ -185,26 +195,63 @@ export default function FinancePage() {
   const [paymentSaving, setPaymentSaving] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
 
+  /** Φόρτωση μόνο της τρέχουσας σελίδας (η αναζήτηση/φίλτρα γίνονται στη βάση) */
+  const loadList = async (options: { page?: number; silent?: boolean } = {}) => {
+    const targetPage = Math.max(1, options.page ?? page);
+    if (!options.silent) setListLoading(true);
+    setError(null);
+    try {
+      const res = await api.getFinanceEntries({
+        page: targetPage,
+        pageSize: PAGE_SIZE,
+        direction: tab === 'all' ? undefined : tab,
+        status: statusFilter || undefined,
+        q: search.trim() || undefined,
+      });
+      setEntries(res.entries || []);
+      setListMeta({
+        total: res.total || 0,
+        counts: res.counts || { all: 0, debt: 0, receivable: 0 },
+        totals: res.totals || { amount: 0, paidAmount: 0, balance: 0 },
+      });
+      setPage(res.page || targetPage);
+    } catch (err: any) {
+      setError(err?.message || 'Σφάλμα φόρτωσης ταμείου');
+    } finally {
+      setListLoading(false);
+    }
+  };
+
   const loadData = async (silent = false) => {
     if (!silent) setLoading(true);
     setError(null);
     try {
-      const [entriesRes, summaryRes, patientsRes, centersRes, referralsRes] = await Promise.all([
-        api.getFinanceEntries(),
+      const [summaryRes, patientsRes, centersRes, referralsRes, yearsRes] = await Promise.all([
         api.getFinanceSummary(),
         api.getPatients(),
         api.getReferenceCenters(),
         api.getReferrals(),
+        api.getFinanceYears(),
       ]);
-      setEntries(entriesRes.entries || []);
       setSummary(summaryRes);
       setPatients(patientsRes.patients || []);
       setCenters(centersRes.centers || []);
       setReferrals(referralsRes.referrals || []);
+      setYears(yearsRes.years || []);
     } catch (err: any) {
       setError(err?.message || 'Σφάλμα φόρτωσης ταμείου');
     } finally {
       setLoading(false);
+    }
+  };
+
+  /** Ανανέωση λίστας + συνόλων μετά από αλλαγή δεδομένων */
+  const refreshAll = async (options: { resetPage?: boolean } = {}) => {
+    await loadData(true);
+    if (options.resetPage && page !== 1) {
+      setPage(1);
+    } else {
+      setListVersion(value => value + 1);
     }
   };
 
@@ -217,9 +264,13 @@ export default function FinancePage() {
 
     const bootstrap = async () => {
       setSyncing(true);
+      let changed = false;
       try {
         const result = await api.syncFinance(undefined, 'auto');
-        if (!result.skipped && result.results?.length > 0) {
+        changed =
+          !result.skipped &&
+          (result.results || []).some(item => (item.created || 0) + (item.updated || 0) > 0);
+        if (changed && result.results?.length > 0) {
           setSyncMessage(result.message);
           setSyncDetails(result.results || []);
         }
@@ -228,7 +279,9 @@ export default function FinancePage() {
         console.warn('Auto finance sync failed:', err?.message || err);
       } finally {
         setSyncing(false);
-        await loadData();
+        await loadData(true);
+        // Η λίστα ξαναφορτώνεται μόνο αν ο συγχρονισμός άλλαξε δεδομένα
+        if (changed) setListVersion(value => value + 1);
       }
     };
 
@@ -245,72 +298,64 @@ export default function FinancePage() {
       const result = await api.syncFinance(undefined, 'manual');
       setSyncMessage(result.message);
       setSyncDetails(result.results || []);
-      await loadData();
-      setPage(1);
+      await refreshAll({ resetPage: true });
     } catch (err: any) {
       setError(err?.message || 'Σφάλμα συγχρονισμού με τα κέντρα αναφοράς');
       // Τα υπάρχοντα δεδομένα παραμένουν διαθέσιμα ακόμη και σε αποτυχία sync
-      await loadData(true);
+      await refreshAll({ resetPage: true });
     } finally {
       setSyncing(false);
     }
   };
 
-  const counts = useMemo(
-    () => ({
-      all: entries.length,
-      debt: entries.filter(e => e.direction === 'debt').length,
-      receivable: entries.filter(e => e.direction === 'receivable').length,
-    }),
-    [entries]
-  );
+  const counts = listMeta.counts;
 
-  const filteredEntries = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return entries.filter(entry => {
-      if (tab !== 'all' && entry.direction !== tab) return false;
-      if (statusFilter && entry.status !== statusFilter) return false;
-      if (!q) return true;
-      return [
-        entry.partyName,
-        entry.patientName,
-        entry.description,
-        entry.referralBarcode,
-        entry.notes,
-        PARTY_TYPE_LABELS[entry.partyType],
-      ]
-        .filter(Boolean)
-        .some(value => String(value).toLowerCase().includes(q));
-    });
-  }, [entries, tab, statusFilter, search]);
+  // Τα σύνολα/μέτρηση έρχονται από τον server για το τρέχον φίλτρο
+  const filteredEntries = entries;
+  const filteredTotals = {
+    amount: listMeta.totals.amount,
+    paid: listMeta.totals.paidAmount,
+    balance: listMeta.totals.balance,
+  };
 
-  const filteredTotals = useMemo(() => {
-    const amount = filteredEntries.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
-    const paid = filteredEntries.reduce((sum, e) => sum + (Number(e.paidAmount) || 0), 0);
-    return { amount: round2(amount), paid: round2(paid), balance: round2(Math.max(0, amount - paid)) };
-  }, [filteredEntries]);
+  // Έτη για επιλογή κατά την εξαγωγή/εκτύπωση (από τον server)
 
-  // Έτη για επιλογή κατά την εξαγωγή/εκτύπωση
-  const availableYears = useMemo(() => {
-    const years = new Set<string>();
-    for (const entry of entries) {
-      const year = String(entry.issueDate || '').slice(0, 4);
-      if (/^\d{4}$/.test(year)) years.add(year);
-    }
-    return Array.from(years).sort((a, b) => b.localeCompare(a));
-  }, [entries]);
-
-  // Σελιδοποίηση: 10 κινήσεις ανά σελίδα, από τις νεότερες στις παλαιότερες
-  const totalPages = Math.max(1, Math.ceil(filteredEntries.length / PAGE_SIZE));
+  // Σελιδοποίηση από τον server: 10 κινήσεις ανά σελίδα
+  const totalPages = Math.max(1, Math.ceil(listMeta.total / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
-  const pageEntries = useMemo(
-    () => filteredEntries.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
-    [filteredEntries, currentPage]
-  );
+  const pageEntries = entries;
 
+  // Αναζήτηση με debounce — μόλις αλλάξει ο όρος, επιστροφή στην 1η σελίδα
   useEffect(() => {
+    const term = searchInput.trim();
+    const timer = setTimeout(() => {
+      setSearch(prev => {
+        if (prev === term) return prev;
+        setPage(1);
+        return term;
+      });
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
+  // Μία φόρτωση ανά αλλαγή σελίδας/φίλτρου (τα δεδομένα έρχονται από τον server)
+  useEffect(() => {
+    if (authLoading) return;
+    loadList({ page });
+  }, [page, tab, statusFilter, search, authLoading, listVersion]);
+
+  /** Αλλαγή φίλτρου → επιστροφή στην 1η σελίδα */
+  const changeTab = (value: 'all' | 'debt' | 'receivable') => {
+    if (value === tab) return;
+    setTab(value);
     setPage(1);
-  }, [tab, statusFilter, search]);
+  };
+
+  const changeStatus = (value: '' | FinanceEntryStatus) => {
+    if (value === statusFilter) return;
+    setStatusFilter(value);
+    setPage(1);
+  };
 
   const centerDebts = summary?.byPartyType.find(
     p => p.direction === 'debt' && p.partyType === 'reference_center'
@@ -323,7 +368,7 @@ export default function FinancePage() {
     p => p.direction === 'receivable' && p.partyType === 'payer'
   );
   /** Αν το κέντρο δίνει DeductedAmount, το σύνολο οφειλών προκύπτει από αυτό */
-  const hasApiOutstanding = entries.some(entry => entry.source?.deductedAmount !== undefined);
+  const hasApiOutstanding = (summary?.totals.centerDeductedCount || 0) > 0;
 
   const resetForm = () => {
     setDirection('debt');
@@ -428,7 +473,7 @@ export default function FinancePage() {
         notes: notes.trim() || undefined,
       });
 
-      await loadData(true);
+      await refreshAll();
       resetForm();
       setShowForm(false);
     } catch (err: any) {
@@ -465,7 +510,7 @@ export default function FinancePage() {
         paidAt: payDate,
         method: payMethod,
       });
-      await loadData(true);
+      await refreshAll();
       setPayAmount('');
     } catch (err: any) {
       setPaymentError(err?.message || 'Σφάλμα καταχώρησης πληρωμής');
@@ -478,7 +523,7 @@ export default function FinancePage() {
     if (!window.confirm('Να ακυρωθεί η καταχώρηση εξόφλησης;')) return;
     try {
       await api.deleteFinancePayment(entry.id, paymentId);
-      await loadData(true);
+      await refreshAll();
     } catch (err: any) {
       setError(err?.message || 'Σφάλμα διαγραφής πληρωμής');
     }
@@ -489,7 +534,7 @@ export default function FinancePage() {
       await api.updateFinanceEntry(entry.id, {
         status: entry.status === 'cancelled' ? 'pending' : 'cancelled',
       });
-      await loadData(true);
+      await refreshAll();
     } catch (err: any) {
       setError(err?.message || 'Σφάλμα ενημέρωσης κατάστασης');
     }
@@ -499,7 +544,7 @@ export default function FinancePage() {
     if (!window.confirm(`Να διαγραφεί η κίνηση «${entry.partyName}»;`)) return;
     try {
       await api.deleteFinanceEntry(entry.id);
-      await loadData(true);
+      await refreshAll();
     } catch (err: any) {
       setError(err?.message || 'Σφάλμα διαγραφής');
     }
@@ -554,9 +599,6 @@ export default function FinancePage() {
     URL.revokeObjectURL(url);
   };
 
-  const entriesForYear = (year: string) =>
-    year ? entries.filter(entry => String(entry.issueDate || '').slice(0, 4) === year) : entries;
-
   /** Άνοιγμα της προεπισκόπησης σε νέα καρτέλα (fallback αν ο browser μπλοκάρει το print dialog) */
   const openPrintWindow = () => {
     const area = document.getElementById('finance-print-area');
@@ -592,17 +634,33 @@ export default function FinancePage() {
     }
   };
 
+  /** Φόρτωση όλων των κινήσεων του έτους (μόνο όταν ζητείται εξαγωγή/εκτύπωση) */
+  const fetchEntriesForYear = async (year: string): Promise<FinanceEntry[]> => {
+    const res = await api.getFinanceEntries({
+      all: true,
+      year: year || undefined,
+    });
+    return res.entries || [];
+  };
+
   /** Εκτυπώσιμη προβολή (in-app preview) αντί για print σε κρυφό iframe */
-  const runExport = (action: 'print' | 'csv') => {
-    const rows = entriesForYear(exportYear);
-    if (rows.length === 0) {
+  const runExport = async (action: 'print' | 'csv') => {
+    setExporting(true);
+    try {
+      const rows = await fetchEntriesForYear(exportYear);
+      if (rows.length === 0) {
+        setExportDialogOpen(false);
+        setError(`Δεν υπάρχουν κινήσεις για το έτος ${exportYear || '—'}`);
+        return;
+      }
+      if (action === 'csv') exportCsv(rows, exportYear);
+      else setPrintPreview({ rows, year: exportYear });
       setExportDialogOpen(false);
-      setError(`Δεν υπάρχουν κινήσεις για το έτος ${exportYear || '—'}`);
-      return;
+    } catch (err: any) {
+      setError(err?.message || 'Σφάλμα φόρτωσης κινήσεων για εξαγωγή');
+    } finally {
+      setExporting(false);
     }
-    if (action === 'csv') exportCsv(rows, exportYear);
-    else setPrintPreview({ rows, year: exportYear });
-    setExportDialogOpen(false);
   };
 
   const printTotals = printPreview
@@ -666,7 +724,7 @@ export default function FinancePage() {
                   <button
                     onClick={() => {
                       setExportAction('print');
-                      setExportYear(availableYears[0] || '');
+                      setExportYear(years[0]?.year || '');
                       setExportMenuOpen(false);
                       setExportDialogOpen(true);
                     }}
@@ -678,7 +736,7 @@ export default function FinancePage() {
                   <button
                     onClick={() => {
                       setExportAction('csv');
-                      setExportYear(availableYears[0] || '');
+                      setExportYear(years[0]?.year || '');
                       setExportMenuOpen(false);
                       setExportDialogOpen(true);
                     }}
@@ -1038,13 +1096,13 @@ export default function FinancePage() {
       {/* Φίλτρα */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-1 bg-white border border-gray-200 rounded-lg p-1 w-fit">
-          <TabButton active={tab === 'all'} onClick={() => setTab('all')}>
+          <TabButton active={tab === 'all'} onClick={() => changeTab('all')}>
             Όλα ({counts.all})
           </TabButton>
-          <TabButton active={tab === 'debt'} onClick={() => setTab('debt')}>
+          <TabButton active={tab === 'debt'} onClick={() => changeTab('debt')}>
             Οφειλές ({counts.debt})
           </TabButton>
-          <TabButton active={tab === 'receivable'} onClick={() => setTab('receivable')}>
+          <TabButton active={tab === 'receivable'} onClick={() => changeTab('receivable')}>
             Απαιτήσεις ({counts.receivable})
           </TabButton>
         </div>
@@ -1052,7 +1110,7 @@ export default function FinancePage() {
         <div className="flex flex-col sm:flex-row gap-2">
           <select
             value={statusFilter}
-            onChange={e => setStatusFilter(e.target.value as '' | FinanceEntryStatus)}
+            onChange={e => changeStatus(e.target.value as '' | FinanceEntryStatus)}
             className="input-field sm:w-48"
           >
             <option value="">Όλες οι καταστάσεις</option>
@@ -1065,35 +1123,40 @@ export default function FinancePage() {
             <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
+              value={searchInput}
+              onChange={e => setSearchInput(e.target.value)}
               className="input-field pl-9 sm:w-72"
               placeholder="Αναζήτηση αντισυμβαλλομένου, ασθενή, barcode..."
             />
+            {listLoading && (
+              <Loader2 className="w-4 h-4 text-primary-500 animate-spin absolute right-3 top-1/2 -translate-y-1/2" />
+            )}
           </div>
         </div>
       </div>
 
       {/* Λίστα */}
-      {loading ? (
+      {loading && entries.length === 0 ? (
         <div className="flex items-center justify-center py-16 text-gray-400 gap-2">
           <Loader2 className="w-5 h-5 animate-spin" />
           Φόρτωση ταμείου...
         </div>
       ) : entries.length === 0 ? (
-        <div className="text-center py-16 bg-white rounded-xl border border-dashed border-gray-300">
-          <Wallet className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-          <p className="text-gray-500 font-medium">Δεν υπάρχουν κινήσεις ταμείου</p>
-          <p className="text-gray-400 text-sm mt-1">
-            Καταχωρήστε την πρώτη οφειλή ή απαίτηση με το κουμπί «Νέα κίνηση».
-          </p>
-        </div>
-      ) : filteredEntries.length === 0 ? (
-        <div className="text-center py-16 bg-gray-50 rounded-xl border border-dashed border-gray-300">
-          <Search className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-          <p className="text-gray-500 font-medium">Δεν βρέθηκαν κινήσεις</p>
-          <p className="text-gray-400 text-sm mt-1">Δοκιμάστε διαφορετικά φίλτρα ή όρο αναζήτησης.</p>
-        </div>
+        listMeta.total === 0 && (search || statusFilter || tab !== 'all') ? (
+          <div className="text-center py-16 bg-gray-50 rounded-xl border border-dashed border-gray-300">
+            <Search className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+            <p className="text-gray-500 font-medium">Δεν βρέθηκαν κινήσεις</p>
+            <p className="text-gray-400 text-sm mt-1">Δοκιμάστε διαφορετικά φίλτρα ή όρο αναζήτησης.</p>
+          </div>
+        ) : (
+          <div className="text-center py-16 bg-white rounded-xl border border-dashed border-gray-300">
+            <Wallet className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+            <p className="text-gray-500 font-medium">Δεν υπάρχουν κινήσεις ταμείου</p>
+            <p className="text-gray-400 text-sm mt-1">
+              Καταχωρήστε την πρώτη οφειλή ή απαίτηση με το κουμπί «Νέα κίνηση».
+            </p>
+          </div>
+        )
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
@@ -1373,14 +1436,12 @@ export default function FinancePage() {
 
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 bg-gray-50/60 px-4 py-3 text-sm">
             <span className="text-gray-500">
-              {filteredEntries.length === 0
+              {listMeta.total === 0
                 ? '0 κινήσεις'
                 : `${(currentPage - 1) * PAGE_SIZE + 1}–${Math.min(
                     currentPage * PAGE_SIZE,
-                    filteredEntries.length
-                  )} από ${filteredEntries.length} ${
-                    filteredEntries.length === 1 ? 'κίνηση' : 'κινήσεις'
-                  }`}
+                    listMeta.total
+                  )} από ${listMeta.total} ${listMeta.total === 1 ? 'κίνηση' : 'κινήσεις'}`}
             </span>
             <div className="flex flex-wrap items-center gap-4">
               <span className="text-gray-500">
@@ -1473,17 +1534,14 @@ export default function FinancePage() {
                   onChange={e => setExportYear(e.target.value)}
                   className="input-field"
                 >
-                  <option value="">Όλα τα έτη ({entries.length})</option>
-                  {availableYears.map(year => {
-                    const count = entries.filter(
-                      entry => String(entry.issueDate || '').slice(0, 4) === year
-                    ).length;
-                    return (
-                      <option key={year} value={year}>
-                        {year} ({count})
-                      </option>
-                    );
-                  })}
+                  <option value="">
+                    Όλα τα έτη ({years.reduce((sum, item) => sum + item.count, 0)})
+                  </option>
+                  {years.map(item => (
+                    <option key={item.year} value={item.year}>
+                      {item.year} ({item.count})
+                    </option>
+                  ))}
                 </select>
               </div>
 

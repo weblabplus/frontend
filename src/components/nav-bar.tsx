@@ -3,7 +3,11 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
-import { LogOut, LogIn, UserPlus, User, Shield, Settings, ChevronLeft, ChevronRight, HeartPulse } from 'lucide-react';
+import { LogOut, LogIn, UserPlus, User, Shield, Settings, ChevronLeft, ChevronRight, HeartPulse, CalendarPlus } from 'lucide-react';
+
+// Σύνδεσμος προς το ανεξάρτητο booking app (Hapio Booking Flow).
+// Ορίζεται στο frontend/.env.local ή στο Vercel. Αν λείπει, το κουμπί κρύβεται.
+const BOOKING_URL = (process.env.NEXT_PUBLIC_BOOKING_URL || '').trim();
 
 export function NavBar() {
   const { user, isAuthenticated, loading, logout } = useAuth();
@@ -69,6 +73,18 @@ export function NavBar() {
             {isAuthenticated && (
               <>
                 <NavLink href="/calendar">Ημερολόγιο</NavLink>
+                {BOOKING_URL && (
+                  <a
+                    href={BOOKING_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="Online ραντεβού ασθενούς (ανοίγει σε νέα καρτέλα)"
+                    className="flex items-center gap-1.5 text-primary-700 hover:text-primary-800 hover:bg-primary-50 transition-colors font-medium text-sm px-2.5 py-1.5 rounded-lg"
+                  >
+                    <CalendarPlus className="w-4 h-4" />
+                    Ραντεβού ασθενή
+                  </a>
+                )}
                 <NavLink href="/patients">Ασθενείς</NavLink>
                 <NavLink href="/visits">Επισκέψεις</NavLink>
                 <NavLink href="/finance">Ταμείο</NavLink>

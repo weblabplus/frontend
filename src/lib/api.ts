@@ -150,19 +150,21 @@ export const api = {
     fetchAPI<{ appointment: AppointmentDto }>(`/appointments/${id}`),
 
   createAppointment: (appointment: Partial<AppointmentDto>) =>
-    fetchAPI<{ appointment: AppointmentDto }>('/appointments', {
+    fetchAPI<{ appointment: AppointmentDto; hapioWarning?: string }>('/appointments', {
       method: 'POST',
       body: JSON.stringify(appointment),
     }),
 
   updateAppointment: (id: string, updates: Partial<AppointmentDto>) =>
-    fetchAPI<{ appointment: AppointmentDto }>(`/appointments/${id}`, {
+    fetchAPI<{ appointment: AppointmentDto; hapioWarning?: string }>(`/appointments/${id}`, {
       method: 'PUT',
       body: JSON.stringify(updates),
     }),
 
   deleteAppointment: (id: string) =>
-    fetchAPI<{ message: string }>(`/appointments/${id}`, { method: 'DELETE' }),
+    fetchAPI<{ message: string; hapioWarning?: string }>(`/appointments/${id}`, {
+      method: 'DELETE',
+    }),
 
   convertAppointmentToVisit: (id: string, visitDate?: string) =>
     fetchAPI<{ appointment: AppointmentDto; visit: any }>(
@@ -171,6 +173,102 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ visitDate }),
       }
+    ),
+
+  // Hapio (bookings / ραντεβού)
+  getHapioStatus: () => fetchAPI<HapioStatus>('/hapio/status'),
+
+  /** Προσωπικό link online ραντεβού του συνδεδεμένου χρήστη */
+  getBookingLink: () =>
+    fetchAPI<{ token: string; owner: { uid: string; displayName: string } }>('/booking-link'),
+
+  /** Ανανέωση προσωπικού link (ακυρώνει το παλιό) */
+  rotateBookingLink: () =>
+    fetchAPI<{ token: string; message: string }>('/booking-link/rotate', { method: 'POST' }),
+
+  /** Links όλων των χρηστών (admin) */
+  getAdminBookingLinks: () =>
+    fetchAPI<{
+      links: Array<{
+        uid: string;
+        displayName: string;
+        email: string;
+        role: string;
+        token: string;
+      }>;
+      total: number;
+    }>('/admin/booking-links'),
+
+  /** Ρυθμίσεις ραντεβού: διάρκεια + βήμα διαθεσιμότητας */
+  updateHapioService: (input: { durationMinutes?: number; bookableIntervalMinutes?: number }) =>
+    fetchAPI<{
+      message: string;
+      service: { id: string; name: string; duration?: string; bookable_interval?: string };
+      durationMinutes: number | null;
+      bookableIntervalMinutes: number | null;
+    }>('/hapio/service', {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+
+  /** Επιλογή προσωπικού (resource) για τα online ραντεβού */
+  setHapioResource: (resourceId: string) =>
+    fetchAPI<{ message: string; resource: { id: string; name: string } }>('/hapio/resource', {
+      method: 'PUT',
+      body: JSON.stringify({ resourceId }),
+    }),
+
+  /** Δημιουργία νέου προσωπικού (resource) */
+  createHapioResource: (name: string) =>
+    fetchAPI<{ message: string; resource: { id: string; name: string } }>('/hapio/resources', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    }),
+
+  setupHapio: (options?: {
+    locationName?: string;
+    serviceName?: string;
+    resourceName?: string;
+    timeZone?: string;
+    serviceDurationMinutes?: number;
+  }) =>
+    fetchAPI<HapioSetupResult>('/hapio/setup', {
+      method: 'POST',
+      body: JSON.stringify(options || {}),
+    }),
+
+  getHapioBookings: (params?: {
+    from?: string;
+    to?: string;
+    canceled?: 'exclude' | 'include' | 'only';
+  }) => {
+    const qs = new URLSearchParams();
+    if (params?.from) qs.set('from', params.from);
+    if (params?.to) qs.set('to', params.to);
+    if (params?.canceled) qs.set('canceled', params.canceled);
+    const query = qs.toString();
+    return fetchAPI<{ bookings: HapioBookingSummary[]; total: number }>(
+      `/hapio/bookings${query ? `?${query}` : ''}`
+    );
+  },
+
+  syncHapio: (input: { date?: string; month?: string; from?: string; to?: string }) =>
+    fetchAPI<HapioSyncResult>('/hapio/sync', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  pushAppointmentToHapio: (id: string) =>
+    fetchAPI<{
+      appointment: AppointmentDto;
+      booking: HapioBookingSummary;
+      resynced?: boolean;
+    }>(`/appointments/${id}/hapio`, { method: 'POST', body: JSON.stringify({}) }),
+
+  cancelAppointmentHapioBooking: (id: string) =>
+    fetchAPI<{ appointment: AppointmentDto; canceled: boolean }>(
+      `/appointments/${id}/hapio/cancel`,
+      { method: 'POST', body: JSON.stringify({}) }
     ),
 
   // Referrals
@@ -545,6 +643,14 @@ export const api = {
     /** Φίλτρο ημερομηνίας λήξης (YYYY-MM-DD) */
     dueFrom?: string;
     dueTo?: string;
+    /** Σελίδα (1-based) */
+    page?: number;
+    /** Γραμμές ανά σελίδα */
+    pageSize?: number;
+    /** true → όλες οι κινήσεις (CSV/εκτύπωση) */
+    all?: boolean;
+    /** Έτος έκδοσης (YYYY) */
+    year?: string;
   }) => {
     const search = new URLSearchParams();
     if (params?.direction) search.set('direction', params.direction);
@@ -553,13 +659,25 @@ export const api = {
     if (params?.q) search.set('q', params.q);
     if (params?.dueFrom) search.set('dueFrom', params.dueFrom);
     if (params?.dueTo) search.set('dueTo', params.dueTo);
+    if (params?.page) search.set('page', String(params.page));
+    if (params?.pageSize) search.set('pageSize', String(params.pageSize));
+    if (params?.all) search.set('all', '1');
+    if (params?.year) search.set('year', params.year);
     const qs = search.toString();
-    return fetchAPI<{ entries: FinanceEntry[]; total: number }>(
-      `/finance/entries${qs ? `?${qs}` : ''}`
-    );
+    return fetchAPI<{
+      entries: FinanceEntry[];
+      total: number;
+      page: number;
+      pageSize: number;
+      totals: { amount: number; paidAmount: number; balance: number };
+      counts: { all: number; debt: number; receivable: number };
+    }>(`/finance/entries${qs ? `?${qs}` : ''}`);
   },
 
   getFinanceSummary: () => fetchAPI<FinanceSummary>('/finance/summary'),
+
+  getFinanceYears: () =>
+    fetchAPI<{ years: Array<{ year: string; count: number }> }>('/finance/years'),
 
   createFinanceEntry: (entry: {
     direction: FinanceDirection;
@@ -773,6 +891,8 @@ export interface FinanceSummary {
     cancelledCount: number;
     /** Σύνολο οφειλών προς κέντρα όπως το δίνει το API (άθροισμα DeductedAmount) */
     centerOutstandingFromApi: number;
+    /** Πόσες κινήσεις κέντρων έχουν DeductedAmount από το API */
+    centerDeductedCount: number;
   };
   byPartyType: FinancePartyTypeSummary[];
   byParty: FinancePartySummary[];
@@ -1013,6 +1133,82 @@ export interface AppointmentDto {
   status: AppointmentStatus;
   /** Η επίσκεψη στην οποία μετατράπηκε το ραντεβού */
   visitId?: string;
+  /** ID του αντίστοιχου booking στο Hapio */
+  hapioBookingId?: string;
+  hapio?: {
+    bookingId: string;
+    serviceId?: string;
+    locationId?: string;
+    resourceId?: string;
+    syncedAt?: string;
+    lastError?: string;
+  };
   createdAt: string;
   updatedAt: string;
+}
+
+// ── Hapio ──
+
+export interface HapioStatus {
+  configured: boolean;
+  connected: boolean;
+  baseUrl: string;
+  autoPush?: boolean;
+  project?: { id: string; name: string; enabled: boolean };
+  counts?: { locations: number; services: number; resources: number };
+  defaults: { locationId: string | null; serviceId: string | null; resourceId: string | null };
+  /** Τρέχουσες ρυθμίσεις ραντεβού (διάρκεια, βήμα ώρας, προσωπικό) */
+  booking?: {
+    serviceId: string | null;
+    serviceName: string | null;
+    durationMinutes: number | null;
+    bookableIntervalMinutes: number | null;
+    resourceId: string | null;
+    resourceName: string | null;
+  };
+  /** Διαθέσιμες επιλογές για τα dropdowns */
+  options?: {
+    services: Array<{
+      id: string;
+      name: string;
+      durationMinutes: number | null;
+      bookableIntervalMinutes: number | null;
+    }>;
+    resources: Array<{ id: string; name: string }>;
+  };
+  error?: string;
+  code?: string;
+}
+
+export interface HapioSetupResult {
+  message: string;
+  location: { id: string; name: string };
+  service: { id: string; name: string };
+  resource: { id: string; name: string };
+  created: { location: boolean; service: boolean; resource: boolean; schedule: boolean };
+}
+
+export interface HapioBookingSummary {
+  id: string;
+  startsAt: string;
+  endsAt: string;
+  isCanceled: boolean;
+  isTemporary: boolean;
+  serviceName?: string;
+  locationName?: string;
+  resourceName?: string;
+  appointmentId?: string;
+  patientId?: string;
+  patientName?: string;
+  reason?: string;
+}
+
+export interface HapioSyncResult {
+  message: string;
+  from: string;
+  to: string;
+  created: number;
+  updated: number;
+  scanned: number;
+  skipped: Array<{ bookingId: string; reason: string }>;
 }

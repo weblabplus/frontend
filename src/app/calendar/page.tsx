@@ -6,6 +6,7 @@ import {
   CalendarDays, Plus, Loader2, ChevronLeft, ChevronRight, Clock, X,
   Trash2, Pencil, Stethoscope, AlertCircle, CheckCircle2, Search, CalendarCheck,
   Wallet, ArrowDownLeft, ArrowUpRight, ClipboardList, Printer, Building2,
+  Cloud,
 } from 'lucide-react';
 import {
   api,
@@ -196,6 +197,10 @@ export default function CalendarPage() {
   const [worklist, setWorklist] = useState<ReferenceCenterWorklist | null>(null);
   const [worklistLoading, setWorklistLoading] = useState(false);
   const [worklistError, setWorklistError] = useState<string | null>(null);
+
+  // ── Hapio (auto-sync ραντεβού) ──
+  const [hapioBusyId, setHapioBusyId] = useState<string | null>(null);
+  const [hapioMessage, setHapioMessage] = useState<string | null>(null);
 
   const loadPatients = useCallback(async () => {
     try {
@@ -490,13 +495,16 @@ export default function CalendarPage() {
 
     try {
       setSaving(true);
+      let hapioWarning: string | undefined;
       if (editingId) {
         const data = await api.updateAppointment(editingId, payload);
+        hapioWarning = data.hapioWarning;
         setAppointments(prev =>
           prev.map(a => (a.id === editingId ? data.appointment : a)).sort(byScheduledAt)
         );
       } else {
         const data = await api.createAppointment(payload);
+        hapioWarning = data.hapioWarning;
         setAppointments(prev => [...prev, data.appointment].sort(byScheduledAt));
       }
 
@@ -506,6 +514,10 @@ export default function CalendarPage() {
         scheduled.getFullYear() !== cursor.getFullYear()
       ) {
         setCursor(startOfMonth(scheduled));
+      }
+
+      if (hapioWarning) {
+        setHapioMessage(`Το ραντεβού αποθηκεύτηκε, αλλά το Hapio επέστρεψε: ${hapioWarning}`);
       }
 
       setFormOpen(false);
@@ -527,7 +539,10 @@ export default function CalendarPage() {
       setActionError(null);
 
       if (type === 'delete') {
-        await api.deleteAppointment(appointment.id);
+        const data = await api.deleteAppointment(appointment.id);
+        if (data.hapioWarning) {
+          setHapioMessage(`Το ραντεβού διαγράφηκε, αλλά το Hapio επέστρεψε: ${data.hapioWarning}`);
+        }
         setAppointments(prev => prev.filter(a => a.id !== appointment.id));
         setPending(null);
       } else {
@@ -605,6 +620,39 @@ export default function CalendarPage() {
     }
   };
 
+  // ── Hapio (retry αποστολής αν απέτυχε ο αυτόματος συγχρονισμός) ──
+  const pushAppointmentToHapio = async (appointment: AppointmentDto) => {
+    try {
+      setHapioBusyId(appointment.id);
+      setActionError(null);
+      setHapioMessage(null);
+      const data = await api.pushAppointmentToHapio(appointment.id);
+      setAppointments(prev =>
+        prev.map(item => (item.id === appointment.id ? data.appointment : item)).sort(byScheduledAt)
+      );
+      setHapioMessage(
+        data.resynced
+          ? 'Το ραντεβού επανασυγχρονίστηκε με το Hapio.'
+          : 'Το ραντεβού στάλθηκε στο Hapio.'
+      );
+    } catch (err: any) {
+      // Το backend αποθηκεύει το σφάλμα στο ραντεβού — το φέρνουμε για να
+      // εμφανιστεί με κόκκινο στην κάρτα.
+      const fresh = await api.getAppointment(appointment.id).catch(() => null);
+      if (fresh?.appointment) {
+        setAppointments(prev =>
+          prev
+            .map(item => (item.id === appointment.id ? fresh.appointment : item))
+            .sort(byScheduledAt)
+        );
+      }
+      setHapioMessage(null);
+      setActionError(err.message || 'Σφάλμα συγχρονισμού με Hapio');
+    } finally {
+      setHapioBusyId(null);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -633,6 +681,16 @@ export default function CalendarPage() {
           </button>
         </div>
       </div>
+
+      {hapioMessage && (
+        <div className="flex items-start gap-3 p-3 bg-sky-50 border border-sky-200 rounded-lg">
+          <Cloud className="w-5 h-5 text-sky-600 shrink-0 mt-0.5" />
+          <p className="flex-1 text-sm text-sky-800">{hapioMessage}</p>
+          <button onClick={() => setHapioMessage(null)} className="text-sky-700 hover:text-sky-900">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {notice && (
         <div className="flex items-start gap-3 p-3 bg-green-50 border border-green-200 rounded-lg">
@@ -883,7 +941,7 @@ export default function CalendarPage() {
                     </div>
                   </div>
 
-                  <div className="mt-2.5">
+                  <div className="mt-2.5 flex flex-wrap items-center gap-2">
                     {a.visitId ? (
                       <Link
                         href={`/visits?patientId=${encodeURIComponent(a.patientId)}`}
@@ -904,7 +962,40 @@ export default function CalendarPage() {
                         Μετατροπή σε επίσκεψη
                       </button>
                     )}
+
+                    {a.hapioBookingId ? (
+                      <span
+                        className="inline-flex items-center gap-1.5 text-xs font-medium text-sky-700 bg-sky-50 border border-sky-200 px-2.5 py-1.5 rounded-lg"
+                        title={`Hapio booking: ${a.hapioBookingId}`}
+                      >
+                        <Cloud className="w-3.5 h-3.5" />
+                        Hapio
+                      </span>
+                    ) : null}
+
+                    {a.hapio?.lastError ? (
+                      <button
+                        onClick={() => pushAppointmentToHapio(a)}
+                        disabled={hapioBusyId === a.id}
+                        className="inline-flex items-center gap-1.5 text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-60"
+                        title={a.hapio.lastError}
+                      >
+                        {hapioBusyId === a.id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Cloud className="w-3.5 h-3.5" />
+                        )}
+                        {a.hapioBookingId ? 'Επανασυγχρονισμός' : 'Επαναποστολή στο Hapio'}
+                      </button>
+                    ) : null}
                   </div>
+
+                  {a.hapio?.lastError && (
+                    <p className="mt-2 flex items-start gap-1.5 rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 text-[11px] font-medium text-red-700">
+                      <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      <span className="break-words">Hapio: {a.hapio.lastError}</span>
+                    </p>
+                  )}
                 </div>
               ))}
                   </div>
@@ -1460,6 +1551,7 @@ export default function CalendarPage() {
           </div>
         </div>
       )}
+
     </div>
   );
 }
