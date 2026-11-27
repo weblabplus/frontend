@@ -7,6 +7,7 @@ import {
   Trash2, Pencil, Stethoscope, AlertCircle, CheckCircle2, Search, CalendarCheck,
   Wallet, ArrowDownLeft, ArrowUpRight, ClipboardList, Printer, Building2,
   Cloud,
+  ExternalLink,
 } from 'lucide-react';
 import {
   api,
@@ -17,6 +18,7 @@ import {
   type ReferenceCenterWorklist,
 } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import { buildBookingLink } from '@/lib/booking-link';
 
 interface Patient {
   id: string;
@@ -201,6 +203,25 @@ export default function CalendarPage() {
   // ── Hapio (auto-sync ραντεβού) ──
   const [hapioBusyId, setHapioBusyId] = useState<string | null>(null);
   const [hapioMessage, setHapioMessage] = useState<string | null>(null);
+
+  // Προσωπικό link online ραντεβού (ανοίγει το ανεξάρτητο booking app)
+  const [bookingLink, setBookingLink] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    if (authLoading) return;
+    (async () => {
+      try {
+        const data = await api.getBookingLink();
+        if (!cancelled) setBookingLink(buildBookingLink(data.token));
+      } catch {
+        if (!cancelled) setBookingLink(buildBookingLink());
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading]);
 
   const loadPatients = useCallback(async () => {
     try {
@@ -667,6 +688,18 @@ export default function CalendarPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {bookingLink && (
+            <a
+              href={bookingLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium text-primary-700 bg-primary-50 border border-primary-200 hover:bg-primary-100 transition-colors"
+              title="Online ραντεβού ασθενούς — ανοίγει σε νέα καρτέλα"
+            >
+              <ExternalLink className="w-4 h-4" />
+              Ραντεβού ασθενή
+            </a>
+          )}
           <button
             onClick={openWorklist}
             className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 transition-colors"
